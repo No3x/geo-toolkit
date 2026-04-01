@@ -24,19 +24,45 @@ jobs:
         run: |
           UPDATE_TYPE="${{ steps.metadata.outputs.update-type }}"
           DEP_NAMES="${{ steps.metadata.outputs.dependency-names }}"
-
-          echo "allow=false" >> "$GITHUB_OUTPUT"
-
-          # Allow semver patch updates
+      
+          allow="false"
+          reasons=()
+      
+          echo "Update type: $UPDATE_TYPE"
+          echo "Dependencies: $DEP_NAMES"
+      
+          # Rule 1: only patch allowed
           if [ "$UPDATE_TYPE" = "version-update:semver-patch" ]; then
-            echo "allow=true" >> "$GITHUB_OUTPUT"
+            allow="true"
+          else
+            reasons+=("Not a patch update ($UPDATE_TYPE)")
           fi
-
-          # Deny risky npm/build/tooling packages even for patches
-          if echo "$DEP_NAMES" | grep -Eiq '(webpack|vite|rollup|esbuild|typescript|babel|swc|next|react-scripts|npm|pnpm|yarn|jsonwebtoken|passport|bcrypt|node-forge|webpack-dev-server)'; then
-            echo "allow=false" >> "$GITHUB_OUTPUT"
+      
+          # Rule 2: deny risky packages
+          if echo "$DEP_NAMES" | grep -Eiq '(webpack|vite|rollup|esbuild|typescript|babel|swc|next|react-scripts|jsonwebtoken|passport|bcrypt|node-forge)'; then
+            allow="false"
+            reasons+=("Contains sensitive package")
           fi
-
+      
+          # Rule 3: manual override label
+          if echo '${{ toJson(github.event.pull_request.labels.*.name) }}' | grep -iq 'manual-review'; then
+            allow="false"
+            reasons+=("manual-review label present")
+          fi
+      
+          # Build reason string
+          if [ ${#reasons[@]} -eq 0 ]; then
+            reason_str="Allowed"
+          else
+            reason_str=$(printf "%s; " "${reasons[@]}")
+          fi
+      
+          echo "allow=$allow" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason_str" >> "$GITHUB_OUTPUT"
+      
+          echo "Decision: allow=$allow"
+          echo "Reason: $reason_str"
+    
       - name: Enable auto-merge
         if: steps.policy.outputs.allow == 'true' && !contains(github.event.pull_request.labels.*.name, 'manual-review')
         env:
