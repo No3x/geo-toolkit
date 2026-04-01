@@ -1,0 +1,45 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dependabot:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+
+      - name: Decide whether this PR may auto-merge
+        id: policy
+        shell: bash
+        run: |
+          UPDATE_TYPE="${{ steps.metadata.outputs.update-type }}"
+          DEP_NAMES="${{ steps.metadata.outputs.dependency-names }}"
+
+          echo "allow=false" >> "$GITHUB_OUTPUT"
+
+          # Allow semver patch updates
+          if [ "$UPDATE_TYPE" = "version-update:semver-patch" ]; then
+            echo "allow=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Deny risky npm/build/tooling packages even for patches
+          if echo "$DEP_NAMES" | grep -Eiq '(webpack|vite|rollup|esbuild|typescript|babel|swc|next|react-scripts|npm|pnpm|yarn|jsonwebtoken|passport|bcrypt|node-forge|webpack-dev-server)'; then
+            echo "allow=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enable auto-merge
+        if: steps.policy.outputs.allow == 'true' && !contains(github.event.pull_request.labels.*.name, 'manual-review')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
